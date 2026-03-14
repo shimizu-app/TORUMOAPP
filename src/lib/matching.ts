@@ -99,13 +99,13 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
   .filter((s) => s.deadline > 0)
   .sort((a, b) => b.score - a.score);
   return {
-    national:   scored.filter((s) => s.layer === "national").slice(0, 4),
+    national:   scored.filter((s) => s.layer === "national"),
     prefecture: scored.filter((s) =>
       s.layer === "prefecture" &&
       (!s.prefecture || s.prefecture === company.prefecture)
-    ).slice(0, 4),
-    city:     scored.filter((s) => s.layer === "city").slice(0, 4),
-    chamber:  scored.filter((s) => s.layer === "chamber").slice(0, 4),
-    other:    scored.filter((s) => s.layer === "other").slice(0, 4),
+    ),
+    city:     scored.filter((s) => s.layer === "city"),
+    chamber:  scored.filter((s) => s.layer === "chamber"),
+    other:    scored.filter((s) => s.layer === "other"),
   };
 }
