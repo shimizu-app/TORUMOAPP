@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { callClaude } from "@/lib/anthropic";
+import { callAI } from "@/lib/anthropic";
 
 export async function POST(req: Request) {
   try {
     const { system, userMessage } = await req.json();
 
-    const text = await callClaude(system, userMessage);
+    const text = await callAI(system, userMessage);
 
     return NextResponse.json({ text });
   } catch (e) {

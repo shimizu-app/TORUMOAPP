@@ -1,23 +1,17 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-export default anthropic;
-
-export async function callClaude(system: string, userMessage: string): Promise<string> {
+export async function callAI(system: string, userMessage: string): Promise<string> {
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      system,
-      messages: [{ role: "user", content: userMessage }],
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash",
+      systemInstruction: system,
     });
-    const block = response.content[0];
-    return block.type === "text" ? block.text : "";
+    const result = await model.generateContent(userMessage);
+    return result.response.text();
   } catch (e) {
-    console.error("Claude API error:", e);
+    console.error("Gemini API error:", e);
     return "";
   }
 }
