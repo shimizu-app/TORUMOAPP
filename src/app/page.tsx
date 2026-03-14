@@ -7,22 +7,8 @@ import Intake from "@/components/intake/Intake";
 import AnalyzingScreen from "@/components/analyzing/AnalyzingScreen";
 import List from "@/components/list/List";
 import Dashboard from "@/components/dashboard/Dashboard";
-import { MATCH_SYS } from "@/lib/constants";
 import { DEMO_COMPANY, DEMO_SUBSIDIES } from "@/lib/data";
 import type { Company, Subsidy, SubsidiesByLayer } from "@/types";
-
-function safeJSON<T = unknown[]>(text: string): T {
-  if (!text) return [] as unknown as T;
-  const s = text.indexOf("[");
-  const e = text.lastIndexOf("]");
-  if (s === -1 || e <= s) return [] as unknown as T;
-  try {
-    const r = JSON.parse(text.slice(s, e + 1));
-    return Array.isArray(r) ? (r as unknown as T) : ([] as unknown as T);
-  } catch {
-    return [] as unknown as T;
-  }
-}
 
 export default function AppPage() {
   const [page, setPage] = useState("home");
@@ -50,37 +36,19 @@ export default function AppPage() {
     setDiagnosed(true);
     setPage("analyzing");
 
-    const pref = answers.prefecture || "東京都";
-    const city = answers.city || pref;
-    const co = JSON.stringify(answers);
+    const res = await fetch("/api/matching", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(answers),
+    });
 
-    const layers = [
-      { key: "national" as const, desc: `国（中小企業庁・経済産業省・厚生労働省など）が出している` },
-      { key: "prefecture" as const, desc: `${pref}が出している都道府県の` },
-      { key: "city" as const, desc: `${city}の市区町村が出している` },
-      { key: "chamber" as const, desc: `商工会議所・商工会・中小機構・NEDOなど公的支援機関が出している` },
-      { key: "other" as const, desc: `業界団体・農協・建設組合・金融機関連携の` },
-    ];
-
-    const result: SubsidiesByLayer = { national: [], prefecture: [], city: [], chamber: [], other: [] };
-
-    for (const layer of layers) {
-      try {
-        const res = await fetch("/api/matching", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            company: co,
-            layerDesc: layer.desc,
-          }),
-        });
-        const data = await res.json();
-        result[layer.key] = safeJSON<Subsidy[]>(data.text);
-      } catch (e) {
-        console.error(layer.key, e);
-      }
+    if (!res.ok) {
+      console.error("Matching API failed:", res.status);
+      setPage("list");
+      return;
     }
 
+    const result: SubsidiesByLayer = await res.json();
     setSubsidiesByLayer(result);
     setPage("list");
   };
