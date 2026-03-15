@@ -11,10 +11,32 @@ const PREFECTURES = [
   "熊本県","大分県","宮崎県","鹿児島県","沖縄県",
 ];
 
-const MAJOR_CITIES = [
-  "札幌市","仙台市","さいたま市","千葉市","横浜市","川崎市",
-  "名古屋市","京都市","大阪市","神戸市","広島市","福岡市",
-  "北九州市","那覇市","東京都千代田区","東京都新宿区",
+const MAJOR_CITIES: { city: string; pref: string }[] = [
+  { city: "札幌市",     pref: "北海道" },
+  { city: "仙台市",     pref: "宮城県" },
+  { city: "さいたま市", pref: "埼玉県" },
+  { city: "千葉市",     pref: "千葉県" },
+  { city: "横浜市",     pref: "神奈川県" },
+  { city: "川崎市",     pref: "神奈川県" },
+  { city: "名古屋市",   pref: "愛知県" },
+  { city: "京都市",     pref: "京都府" },
+  { city: "大阪市",     pref: "大阪府" },
+  { city: "神戸市",     pref: "兵庫県" },
+  { city: "広島市",     pref: "広島県" },
+  { city: "福岡市",     pref: "福岡県" },
+  { city: "北九州市",   pref: "福岡県" },
+  { city: "那覇市",     pref: "沖縄県" },
+  { city: "新宿区",     pref: "東京都" },
+  { city: "渋谷区",     pref: "東京都" },
+  { city: "千代田区",   pref: "東京都" },
+  { city: "静岡市",     pref: "静岡県" },
+  { city: "浜松市",     pref: "静岡県" },
+  { city: "岡山市",     pref: "岡山県" },
+  { city: "熊本市",     pref: "熊本県" },
+  { city: "鹿児島市",   pref: "鹿児島県" },
+  { city: "宇都宮市",   pref: "栃木県" },
+  { city: "金沢市",     pref: "石川県" },
+  { city: "松山市",     pref: "愛媛県" },
 ];
 
 async function fetchFromJgrants(area: string, limit = 50): Promise<any[]> {
@@ -133,17 +155,14 @@ export async function GET(req: Request) {
 
     // 3. 主要都市
     const cityRecords: ReturnType<typeof transformSubsidy>[] = [];
-    for (const city of MAJOR_CITIES) {
-      await new Promise((r) => setTimeout(r, 200));
+    for (const { city, pref } of MAJOR_CITIES) {
+      await new Promise((r) => setTimeout(r, 300));
       const items = await fetchFromJgrants(city, 20);
       const cityOnly = items.filter(
-        (s) => s.target_area_search && s.target_area_search.includes(city)
-      );
-      const pref = PREFECTURES.find((p) =>
-        city.includes(p.replace(/[都道府県]/, "").slice(0, 2))
+        (s: any) => s.target_area_search && s.target_area_search.includes(city)
       );
       cityRecords.push(
-        ...cityOnly.map((s) => transformSubsidy(s, "city", pref, city))
+        ...cityOnly.map((s: any) => transformSubsidy(s, "city", pref, city))
       );
     }
 
