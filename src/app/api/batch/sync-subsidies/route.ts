@@ -77,22 +77,86 @@ function transformSubsidy(
       : `${s.subsidy_max_limit}円`
     : "要確認";
 
+  // タイトル・概要・対象者・経費を横断してタグ付け
   const tags: string[] = [];
-  const title = (s.title || "").toLowerCase();
-  if (title.includes("it") || title.includes("デジタル") || title.includes("dx"))
+  const searchText = [
+    s.title || "",
+    s.summary || "",
+    s.target_number_of_employees || "",
+    s.subsidy_expense || "",
+  ].join(" ").toLowerCase();
+
+  // IT・DX
+  if (searchText.includes("it") || searchText.includes("デジタル") || searchText.includes("dx")
+    || searchText.includes("ict") || searchText.includes("クラウド") || searchText.includes("システム"))
     tags.push("IT化", "DX", "デジタル");
-  if (title.includes("設備") || title.includes("機械")) tags.push("設備投資");
-  if (title.includes("省エネ") || title.includes("gx") || title.includes("環境"))
-    tags.push("省エネ", "GX");
-  if (title.includes("雇用") || title.includes("採用") || title.includes("人材"))
+  if (searchText.includes("クラウド") || searchText.includes("saas"))
+    tags.push("クラウド", "SaaS");
+
+  // 設備投資
+  if (searchText.includes("設備") || searchText.includes("機械") || searchText.includes("装置"))
+    tags.push("設備投資");
+  if (searchText.includes("設備更新") || searchText.includes("老朽"))
+    tags.push("設備更新");
+
+  // 省エネ・GX
+  if (searchText.includes("省エネ") || searchText.includes("gx") || searchText.includes("環境")
+    || searchText.includes("脱炭素") || searchText.includes("カーボン"))
+    tags.push("省エネ", "GX", "カーボンニュートラル");
+  if (searchText.includes("nedo"))
+    tags.push("NEDO");
+
+  // 雇用
+  if (searchText.includes("雇用") || searchText.includes("採用") || searchText.includes("人材")
+    || searchText.includes("正社員") || searchText.includes("賃金") || searchText.includes("労働"))
     tags.push("雇用");
-  if (title.includes("販路") || title.includes("ec") || title.includes("販売"))
+  if (searchText.includes("正社員化") || searchText.includes("キャリアアップ"))
+    tags.push("正社員化");
+
+  // 販路開拓
+  if (searchText.includes("販路") || searchText.includes("ec") || searchText.includes("販売")
+    || searchText.includes("展示会") || searchText.includes("マーケティング"))
     tags.push("販路開拓");
-  if (title.includes("創業") || title.includes("起業")) tags.push("創業");
-  if (title.includes("ものづくり") || title.includes("製造"))
+  if (searchText.includes("ec") || searchText.includes("eコマース") || searchText.includes("ネットショップ"))
+    tags.push("EC");
+
+  // 創業・事業承継
+  if (searchText.includes("創業") || searchText.includes("起業") || searchText.includes("スタートアップ"))
+    tags.push("創業");
+  if (searchText.includes("事業承継") || searchText.includes("後継者") || searchText.includes("引継"))
+    tags.push("事業承継");
+  if (searchText.includes("事業転換") || searchText.includes("再構築"))
+    tags.push("事業転換");
+
+  // 製造業
+  if (searchText.includes("ものづくり") || searchText.includes("製造") || searchText.includes("工場"))
     tags.push("製造業", "ものづくり");
-  if (title.includes("小規模")) tags.push("小規模事業者");
-  if (tags.length === 0) tags.push("中小企業支援");
+  if (searchText.includes("iot") || searchText.includes("センサー") || searchText.includes("自動化"))
+    tags.push("IoT活用");
+
+  // 業種特化
+  if (searchText.includes("小規模"))
+    tags.push("小規模事業者");
+  if (searchText.includes("介護") || searchText.includes("福祉"))
+    tags.push("福祉", "介護");
+  if (searchText.includes("医療") || searchText.includes("病院") || searchText.includes("診療所"))
+    tags.push("医療");
+  if (searchText.includes("建設") || searchText.includes("建築") || searchText.includes("土木"))
+    tags.push("建設");
+  if (searchText.includes("物流") || searchText.includes("運送") || searchText.includes("トラック"))
+    tags.push("物流");
+  if (searchText.includes("飲食") || searchText.includes("宿泊") || searchText.includes("観光"))
+    tags.push("販路開拓", "小規模事業者");
+  if (searchText.includes("海外") || searchText.includes("輸出") || searchText.includes("グローバル"))
+    tags.push("海外展開", "グローバル");
+
+  // 生産性
+  if (searchText.includes("生産性") || searchText.includes("効率化") || searchText.includes("業務改善"))
+    tags.push("生産性", "効率化");
+
+  // 重複排除
+  const uniqueTags = Array.from(new Set(tags));
+  if (uniqueTags.length === 0) uniqueTags.push("中小企業支援");
 
   return {
     jgrants_id: s.id,
@@ -109,7 +173,7 @@ function transformSubsidy(
     summary: s.summary || s.title || "",
     strategy: null,
     name_ideas: null,
-    tags,
+    tags: uniqueTags,
     eligible: s.target_number_of_employees || "中小企業・小規模事業者",
     expense: s.subsidy_expense || "要確認",
     difficulty: "中",
