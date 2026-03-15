@@ -1,5 +1,6 @@
 import { createServerSupabaseClient as createClient } from "@/lib/supabase/server";
 import type { Company, Subsidy, SubsidiesByLayer } from "@/types";
+
 const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   "製造業":           ["製造業", "ものづくり", "設備", "DX", "IoT", "省エネ", "生産性"],
   "IT・ソフトウェア":  ["IT化", "DX", "デジタル", "クラウド", "システム", "SaaS"],
@@ -10,6 +11,7 @@ const INDUSTRY_KEYWORDS: Record<string, string[]> = {
   "飲食・宿泊":       ["販路開拓", "小規模事業者", "EC", "デジタル"],
   "その他":           ["創業", "販路開拓", "DX"],
 };
+
 const CHALLENGE_KEYWORDS: Record<string, string[]> = {
   "設備の老朽化":     ["設備投資", "設備更新", "ものづくり", "生産性"],
   "IT化・デジタル化": ["IT化", "DX", "デジタル", "クラウド", "システム"],
@@ -22,31 +24,44 @@ const CHALLENGE_KEYWORDS: Record<string, string[]> = {
   "品質向上":         ["ものづくり", "DX", "IoT", "製造業"],
   "資金調達":         ["創業", "事業転換", "設備投資"],
 };
+
+function safeParseJSON(val: any): any {
+  if (val === null || val === undefined) return null;
+  if (typeof val !== "string") return val;
+  try { return JSON.parse(val); } catch { return null; }
+}
+
 export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer> {
   const supabase = createClient();
   const today = new Date().toISOString().split("T")[0];
+
   const { data: allSubsidies, error } = await supabase
     .from("subsidies")
     .select("*")
     .eq("is_active", true)
     .gte("deadline_date", today);
+
   if (error || !allSubsidies || allSubsidies.length === 0) {
     console.error("Supabase fetch error:", error);
     return { national: [], prefecture: [], city: [], chamber: [], other: [] };
   }
+
   const scored = allSubsidies.map((s) => {
     let score = s.score_base || 60;
-    // ① 業種マッチ（最大 +24）
+
+    // ① 業種マッチ
     const industryKw = INDUSTRY_KEYWORDS[company.industry || ""] || [];
     const indMatches = (s.tags as string[] || []).filter((t) =>
       industryKw.some((k) => t.includes(k))
     ).length;
     score += indMatches * 8;
-    // ② 地域マッチ（最大 +20）
+
+    // ② 地域マッチ
     if (["national", "chamber", "other"].includes(s.layer)) score += 5;
     if (s.prefecture && s.prefecture === company.prefecture) score += 20;
-    if (s.layer === "city" && company.city && s.name.includes(company.city)) score += 15;
-    // ③ 課題マッチ（最大 +30）
+    if (s.layer === "city" && s.city && s.city === company.city) score += 15;
+
+    // ③ 課題マッチ
     (company.challenges || []).forEach((ch: string) => {
       const ckw = CHALLENGE_KEYWORDS[ch] || [];
       const matches = (s.tags as string[] || []).filter((t) =>
@@ -54,25 +69,33 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
       ).length;
       score += matches * 6;
     });
+
     // ④ 財務状況
     if (company.profit === "黒字") score += 5;
     if (company.profit === "赤字") score -= 8;
     if (company.cashflow === "毎月プラス（安定）") score += 3;
     if (company.cashflow === "慢性的にマイナス") score -= 5;
+
     // ⑤ 申請経験
     if (company.subsidyExp === "複数回採択あり") score += 10;
     else if (company.subsidyExp === "過去に採択あり") score += 6;
     else if (company.subsidyExp === "初めて" && s.difficulty === "低") score += 8;
+
     // ⑥ 雇用予定
     if (company.employment === "増やす予定") {
       if ((s.tags as string[] || []).some((t) => t.includes("雇用"))) score += 8;
     }
+
     // ⑦ 認定・受賞歴
     if ((company.certifications || []).some((c: string) => c !== "なし")) score += 4;
-    const deadline = Math.ceil(
-      (new Date(s.deadline_date).getTime() - Date.now()) / 86400000
-    );
+
+    // deadline_date が null の場合は 90 日としておく
+    const deadline = s.deadline_date
+      ? Math.ceil((new Date(s.deadline_date).getTime() - Date.now()) / 86400000)
+      : 90;
+
     const normalizedScore = Math.min(95, Math.max(50, score));
+
     return {
       id: s.id,
       name: s.name,
@@ -85,27 +108,57 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
       status: normalizedScore >= 70 ? "高" : normalizedScore >= 55 ? "中" : "低",
       summary: s.summary,
       strategy: s.strategy,
-      nameIdeas: typeof s.name_ideas === "string" ? JSON.parse(s.name_ideas) : s.name_ideas,
+      nameIdeas: safeParseJSON(s.name_ideas),
       tags: s.tags,
       eligible: s.eligible,
       expense: s.expense,
       difficulty: s.difficulty,
       url: s.url,
       form_url: s.form_url,
-      sections: typeof s.sections === "string" ? JSON.parse(s.sections) : s.sections,
+      sections: safeParseJSON(s.sections),
       prefecture: s.prefecture,
+      city: s.city,
     } as Subsidy;
   })
   .filter((s) => s.deadline > 0)
   .sort((a, b) => b.score - a.score);
+
   return {
-    national:   scored.filter((s) => s.layer === "national"),
-    prefecture: scored.filter((s) =>
-      s.layer === "prefecture" &&
-      (!s.prefecture || s.prefecture === company.prefecture)
-    ),
-    city:     scored.filter((s) => s.layer === "city"),
-    chamber:  scored.filter((s) => s.layer === "chamber"),
-    other:    scored.filter((s) => s.layer === "other"),
+    // 国：全件対象
+    national: scored
+      .filter((s) => s.layer === "national")
+      .slice(0, 4),
+
+    // 都道府県：完全一致必須（nullは除外）
+    prefecture: scored
+      .filter((s) =>
+        s.layer === "prefecture" &&
+        s.prefecture === company.prefecture
+      )
+      .slice(0, 4),
+
+    // 市区町村：完全一致必須
+    city: scored
+      .filter((s) =>
+        s.layer === "city" &&
+        s.city === company.city
+      )
+      .slice(0, 4),
+
+    // 商工会議所：同じ都道府県 or 全国
+    chamber: scored
+      .filter((s) =>
+        s.layer === "chamber" &&
+        (!s.prefecture || s.prefecture === company.prefecture)
+      )
+      .slice(0, 4),
+
+    // 公的機関：同じ都道府県 or 全国
+    other: scored
+      .filter((s) =>
+        s.layer === "other" &&
+        (!s.prefecture || s.prefecture === company.prefecture)
+      )
+      .slice(0, 4),
   };
 }
