@@ -156,7 +156,7 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
     } as Subsidy;
   })
   // 関連性が0の補助金は除外（業種・課題に1つも引っかからない＝無関係）
-  .filter((s) => s.deadline > 0 && (s.relevanceHits ?? 0) > 0)
+  .filter((s) => s.deadline > 0)
   .sort((a, b) => b.score - a.score);
 
   return {
