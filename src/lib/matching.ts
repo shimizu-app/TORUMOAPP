@@ -1,15 +1,21 @@
 import { createServerSupabaseClient as createClient } from "@/lib/supabase/server";
 import type { Company, Subsidy, SubsidiesByLayer } from "@/types";
 
+// どの業種でも関連する共通キーワード
+const UNIVERSAL_KEYWORDS = [
+  "中小企業支援", "雇用", "正社員化", "採用", "人材育成",
+  "創業", "事業転換", "事業承継", "生産性", "効率化", "設備投資",
+];
+
 const INDUSTRY_KEYWORDS: Record<string, string[]> = {
-  "製造業":           ["製造業", "ものづくり", "設備", "DX", "IoT", "省エネ", "生産性"],
-  "IT・ソフトウェア":  ["IT化", "DX", "デジタル", "クラウド", "システム", "SaaS"],
-  "小売・卸売":       ["販路開拓", "EC", "デジタル", "小規模事業者"],
-  "医療・福祉":       ["医療", "福祉", "介護", "助成金", "雇用"],
-  "建設業":           ["設備投資", "建設", "DX", "省エネ"],
-  "運輸・物流":       ["物流", "DX", "省エネ", "設備", "IT化"],
-  "飲食・宿泊":       ["販路開拓", "小規模事業者", "EC", "デジタル"],
-  "その他":           ["創業", "販路開拓", "DX"],
+  "製造業":           ["製造業", "ものづくり", "設備", "DX", "IoT", "省エネ", "生産性", "設備更新", "自動化"],
+  "IT・ソフトウェア":  ["IT化", "DX", "デジタル", "クラウド", "システム", "SaaS", "IoT活用", "EC"],
+  "小売・卸売":       ["販路開拓", "EC", "デジタル", "小規模事業者", "IT化", "DX"],
+  "医療・福祉":       ["医療", "福祉", "介護", "助成金", "雇用", "DX", "IT化"],
+  "建設業":           ["設備投資", "建設", "DX", "省エネ", "IT化", "雇用", "採用"],
+  "運輸・物流":       ["物流", "DX", "省エネ", "設備", "IT化", "効率化"],
+  "飲食・宿泊":       ["販路開拓", "小規模事業者", "EC", "デジタル", "IT化", "雇用"],
+  "その他":           ["創業", "販路開拓", "DX", "IT化", "デジタル", "設備投資"],
 };
 
 const CHALLENGE_KEYWORDS: Record<string, string[]> = {
@@ -50,7 +56,7 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
     let score = s.score_base || 60;
     let relevanceHits = 0; // 業種・課題で何個タグがマッチしたか
 
-    // ① 業種マッチ
+    // ① 業種マッチ（業種固有 + 全業種共通）
     const industryKw = INDUSTRY_KEYWORDS[company.industry || ""] || [];
     const tags = (s.tags as string[]) || [];
     const indMatches = tags.filter((t) =>
@@ -58,6 +64,13 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
     ).length;
     score += indMatches * 8;
     relevanceHits += indMatches;
+
+    // 全業種共通キーワード（雇用・創業・事業承継など業種を問わず関連）
+    const uniMatches = tags.filter((t) =>
+      UNIVERSAL_KEYWORDS.some((k) => t.includes(k))
+    ).length;
+    score += uniMatches * 3;
+    relevanceHits += uniMatches;
 
     // ② 地域マッチ（地域一致も関連性としてカウント）
     if (["national", "chamber", "other"].includes(s.layer)) score += 5;
