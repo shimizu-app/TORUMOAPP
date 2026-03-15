@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { Company } from "@/types";
 
-const client = new Anthropic();
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 export async function POST(req: Request) {
   const company: Company = await req.json();
@@ -86,8 +87,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // Step 2: Claude に候補と企業情報を渡してスコアリング
-    const prompt = `企業情報:
+    // Step 2: Gemini Flash に候補と企業情報を渡してスコアリング
+    const prompt = `あなたは補助金マッチング専門家です。企業情報に基づいて補助金候補を評価し、JSON配列のみ返してください。
+説明文・コードブロック不要。JSON配列のみ。
+
+企業情報:
 業種: ${company.industry} / ${company.industryDetail}
 都道府県: ${company.prefecture} / 市区町村: ${company.city}
 従業員: ${company.employees} / 売上: ${company.revenue}
@@ -97,7 +101,6 @@ export async function POST(req: Request) {
 雇用予定: ${company.employment}
 
 以下の補助金候補を評価し、企業に合う順にランキングしてJSON配列で返してください。
-説明文・コードブロック不要。JSON配列のみ。
 
 各要素のキー:
 - id (string): 候補のid
@@ -129,16 +132,8 @@ ${JSON.stringify(
   2
 )}`;
 
-    const msg = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 3000,
-      system:
-        "あなたは補助金マッチング専門家です。企業情報に基づいて補助金候補を評価し、JSON配列のみ返してください。",
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text =
-      msg.content[0].type === "text" ? msg.content[0].text : "[]";
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
     const s = text.indexOf("[");
     const e = text.lastIndexOf("]");
     const ranked: any[] =
