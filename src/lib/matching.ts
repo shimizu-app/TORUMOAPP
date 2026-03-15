@@ -48,13 +48,16 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
 
   const scored = allSubsidies.map((s) => {
     let score = s.score_base || 60;
+    let relevanceHits = 0; // 業種・課題で何個タグがマッチしたか
 
     // ① 業種マッチ
     const industryKw = INDUSTRY_KEYWORDS[company.industry || ""] || [];
-    const indMatches = (s.tags as string[] || []).filter((t) =>
+    const tags = (s.tags as string[]) || [];
+    const indMatches = tags.filter((t) =>
       industryKw.some((k) => t.includes(k))
     ).length;
     score += indMatches * 8;
+    relevanceHits += indMatches;
 
     // ② 地域マッチ
     if (["national", "chamber", "other"].includes(s.layer)) score += 5;
@@ -64,10 +67,11 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
     // ③ 課題マッチ
     (company.challenges || []).forEach((ch: string) => {
       const ckw = CHALLENGE_KEYWORDS[ch] || [];
-      const matches = (s.tags as string[] || []).filter((t) =>
+      const matches = tags.filter((t) =>
         ckw.some((k) => t.includes(k))
       ).length;
       score += matches * 6;
+      relevanceHits += matches;
     });
 
     // ④ 財務状況
@@ -83,11 +87,22 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
 
     // ⑥ 雇用予定
     if (company.employment === "増やす予定") {
-      if ((s.tags as string[] || []).some((t) => t.includes("雇用"))) score += 8;
+      if (tags.some((t) => t.includes("雇用"))) {
+        score += 8;
+        relevanceHits += 1;
+      }
     }
 
     // ⑦ 認定・受賞歴
     if ((company.certifications || []).some((c: string) => c !== "なし")) score += 4;
+
+    // ⑧ eligible（対象者）テキストに業種名が含まれていればボーナス
+    const eligibleText = (s.eligible || "").toLowerCase();
+    const industryName = (company.industry || "").toLowerCase();
+    if (industryName && eligibleText.includes(industryName)) {
+      score += 10;
+      relevanceHits += 1;
+    }
 
     // deadline_date が null の場合は 90 日としておく
     const deadline = s.deadline_date
@@ -105,6 +120,7 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
       rate: s.rate || "",
       deadline,
       score: normalizedScore,
+      relevanceHits,
       status: normalizedScore >= 70 ? "高" : normalizedScore >= 55 ? "中" : "低",
       summary: s.summary,
       strategy: s.strategy,
@@ -120,7 +136,8 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
       city: s.city,
     } as Subsidy;
   })
-  .filter((s) => s.deadline > 0)
+  // 関連性が0の補助金は除外（業種・課題に1つも引っかからない＝無関係）
+  .filter((s) => s.deadline > 0 && (s.relevanceHits ?? 0) > 0)
   .sort((a, b) => b.score - a.score);
 
   return {

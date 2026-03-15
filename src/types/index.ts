@@ -38,6 +38,7 @@ export interface Subsidy {
   deadline_date?: string;
   score: number;
   score_base?: number;
+  relevanceHits?: number;
   status: string;
   summary?: string;
   strategy?: string;
