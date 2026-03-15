@@ -59,10 +59,16 @@ export async function matchSubsidies(company: Company): Promise<SubsidiesByLayer
     score += indMatches * 8;
     relevanceHits += indMatches;
 
-    // ② 地域マッチ
+    // ② 地域マッチ（地域一致も関連性としてカウント）
     if (["national", "chamber", "other"].includes(s.layer)) score += 5;
-    if (s.prefecture && s.prefecture === company.prefecture) score += 20;
-    if (s.layer === "city" && s.city && s.city === company.city) score += 15;
+    if (s.prefecture && s.prefecture === company.prefecture) {
+      score += 20;
+      relevanceHits += 1;
+    }
+    if (s.layer === "city" && s.city && s.city === company.city) {
+      score += 15;
+      relevanceHits += 1;
+    }
 
     // ③ 課題マッチ
     (company.challenges || []).forEach((ch: string) => {
