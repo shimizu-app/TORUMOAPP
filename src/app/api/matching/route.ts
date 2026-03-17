@@ -154,8 +154,31 @@ ${JSON.stringify(candidates.map(s => ({
   }
 ]`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    // Gemini呼び出し（リトライあり: レート制限対策）
+    let text = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await model.generateContent(prompt);
+        text = result.response.text();
+        break;
+      } catch (geminiErr: any) {
+        const msg = geminiErr?.message || String(geminiErr);
+        console.error(`[matching] Gemini attempt ${attempt + 1} failed:`, msg);
+        if (attempt < 2 && (msg.includes("429") || msg.includes("Resource") || msg.includes("retry"))) {
+          const wait = (attempt + 1) * 5000; // 5s, 10s
+          console.log(`[matching] waiting ${wait}ms before retry...`);
+          await new Promise(r => setTimeout(r, wait));
+        } else {
+          throw geminiErr;
+        }
+      }
+    }
+
+    if (!text) {
+      console.error("[matching] Gemini returned empty after retries");
+      return NextResponse.json(empty, { status: 503 });
+    }
+
     console.log("[matching] Gemini response length:", text.length);
     const ranked: any[] = JSON.parse(text);
     console.log("[matching] ranked count:", ranked.length, "layers:", Array.from(new Set(ranked.map(r => r.layer))));
