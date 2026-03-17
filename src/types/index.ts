@@ -54,6 +54,7 @@ export interface Subsidy {
   sections?: Section[];
   prefecture?: string;
   city?: string;
+  target_area?: string;
   is_active?: boolean;
 }
 
