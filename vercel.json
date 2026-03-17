@@ -6,10 +6,10 @@
     }
   ],
   "functions": {
-    "api/batch/sync-subsidies": {
+    "src/app/api/batch/sync-subsidies/route.ts": {
       "maxDuration": 300
     },
-    "api/admin/sync-subsidies": {
+    "src/app/api/admin/sync-subsidies/route.ts": {
       "maxDuration": 300
     }
   }
