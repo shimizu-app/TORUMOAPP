@@ -1,21 +1,18 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const PREFECTURES = [
-  "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
-  "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
-  "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
-  "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
-  "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
-  "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
-  "熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+// J-Grants APIは keyword AND target_area_search のAND検索。
+// 1つのキーワードでは網羅できないため、複数キーワードで叩いてマージする。
+const KEYWORDS = [
+  "補助金", "助成", "支援", "設備", "雇用", "中小", "事業",
+  "IT", "デジタル", "省エネ", "創業", "販路",
 ];
 
-async function fetchFromJgrants(area: string, limit = 50): Promise<any[]> {
+async function fetchFromJgrants(keyword: string, area?: string, limit = 100): Promise<any[]> {
   try {
     const url = new URL("https://api.jgrants-portal.go.jp/exp/v1/public/subsidies");
-    url.searchParams.set("keyword", "補助金");
-    url.searchParams.set("target_area_search", area);
+    url.searchParams.set("keyword", keyword);
+    if (area) url.searchParams.set("target_area_search", area);
     url.searchParams.set("acceptance", "1");
     url.searchParams.set("sort", "acceptance_end_datetime");
     url.searchParams.set("order", "ASC");
@@ -28,9 +25,29 @@ async function fetchFromJgrants(area: string, limit = 50): Promise<any[]> {
     const data = await res.json();
     return data.result || [];
   } catch (e) {
-    console.error(`Jgrants fetch error (${area}):`, e);
+    console.error(`Jgrants fetch error (kw=${keyword}, area=${area}):`, e);
     return [];
   }
+}
+
+// 複数キーワードで取得し、idで重複排除してマージ
+async function fetchAllForArea(area?: string, logs?: string[]): Promise<any[]> {
+  const seen = new Map<string, any>();
+  for (const kw of KEYWORDS) {
+    await new Promise((r) => setTimeout(r, 200));
+    const items = await fetchFromJgrants(kw, area, 100);
+    let newCount = 0;
+    for (const item of items) {
+      if (!seen.has(item.id)) {
+        seen.set(item.id, item);
+        newCount++;
+      }
+    }
+    if (logs && items.length > 0) {
+      logs.push(`  kw="${kw}" ${area || "no-area"}: ${items.length}件 (新規${newCount})`);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 function buildTags(s: any): string[] {
@@ -62,7 +79,30 @@ function buildTags(s: any): string[] {
   return unique.length > 0 ? unique : ["中小企業支援"];
 }
 
-function transformSubsidy(s: any, layer: string, prefecture?: string) {
+function determineLayer(targetArea: string): string {
+  if (targetArea === "全国") return "national";
+  // 市区町村を含む場合は city
+  if (targetArea.includes("市") || targetArea.includes("区") || targetArea.includes("町") || targetArea.includes("村")) return "city";
+  return "prefecture";
+}
+
+function extractPrefecture(targetArea: string): string | null {
+  const prefList = [
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+    "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+    "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+    "熊本県","大分県","宮崎県","鹿児島県","沖縄県",
+  ];
+  for (const p of prefList) {
+    if (targetArea.includes(p)) return p;
+  }
+  return null;
+}
+
+function transformSubsidy(s: any) {
   const endDate = s.acceptance_end_datetime
     ? new Date(s.acceptance_end_datetime).toISOString().split("T")[0]
     : null;
@@ -71,14 +111,17 @@ function transformSubsidy(s: any, layer: string, prefecture?: string) {
       ? `${Math.floor(s.subsidy_max_limit / 10000)}万円`
       : `${s.subsidy_max_limit}円`
     : "要確認";
-  const targetArea = s.target_area_search || prefecture || "全国";
+
+  const targetArea = s.target_area_search || "全国";
+  const layer = determineLayer(targetArea);
+  const prefecture = extractPrefecture(targetArea);
 
   return {
     jgrants_id: s.id,
     name: s.title || "不明",
     org: s.government_agencies || "主管機関",
     layer,
-    prefecture: prefecture || null,
+    prefecture,
     target_area: targetArea,
     max_amount: maxAmount,
     rate: s.subsidy_rate || "要確認",
@@ -106,32 +149,14 @@ export async function GET() {
   let totalUpserted = 0;
 
   try {
-    // 1. 全国
-    logs.push("Fetching national subsidies...");
-    const national = await fetchFromJgrants("全国", 100);
-    logs.push(`  → ${national.length} 件取得`);
-    const nationalRecords = national.map((s) => transformSubsidy(s, "national"));
+    // エリアなし（全国横断）で複数キーワード検索
+    logs.push("=== 全キーワード × エリアなし ===");
+    const allItems = await fetchAllForArea(undefined, logs);
+    logs.push(`→ 重複排除後: ${allItems.length} 件`);
 
-    // 2. 都道府県ごと
-    const prefRecords: any[] = [];
-    for (const pref of PREFECTURES) {
-      await new Promise((r) => setTimeout(r, 250));
-      const items = await fetchFromJgrants(pref, 50);
-      const filtered = items.filter((s) =>
-        !s.target_area_search || s.target_area_search !== "全国"
-      );
-      prefRecords.push(...filtered.map((s) => {
-        const area = s.target_area_search || "";
-        const isCityLevel = area.includes("市") || area.includes("区") || area.includes("町") || area.includes("村");
-        const layer = isCityLevel ? "city" : "prefecture";
-        return transformSubsidy(s, layer, pref);
-      }));
-      logs.push(`${pref}: ${items.length} 件取得 → ${filtered.length} 件保存対象`);
-    }
+    const allRecords = allItems.map(transformSubsidy);
 
-    // 3. upsert
-    const allRecords = [...nationalRecords, ...prefRecords];
-    logs.push(`\nTotal records: ${allRecords.length}`);
+    logs.push(`\nTotal records to upsert: ${allRecords.length}`);
 
     if (allRecords.length > 0) {
       const CHUNK = 100;
@@ -148,14 +173,14 @@ export async function GET() {
       }
     }
 
-    // 4. 期限切れを無効化
+    // 期限切れを無効化
     await supabase
       .from("subsidies")
       .update({ is_active: false })
       .lt("deadline_date", new Date().toISOString().split("T")[0])
       .not("deadline_date", "is", null);
 
-    // 5. 現在の統計
+    // 統計
     const { data: stats } = await supabase
       .from("subsidies")
       .select("layer, is_active")
