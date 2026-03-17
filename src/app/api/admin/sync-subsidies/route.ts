@@ -14,6 +14,7 @@ const PREFECTURES = [
 async function fetchFromJgrants(area: string, limit = 50): Promise<any[]> {
   try {
     const url = new URL("https://api.jgrants-portal.go.jp/exp/v1/public/subsidies");
+    url.searchParams.set("keyword", "補助金");
     url.searchParams.set("target_area_search", area);
     url.searchParams.set("acceptance", "1");
     url.searchParams.set("sort", "acceptance_end_datetime");
