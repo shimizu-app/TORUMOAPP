@@ -9,14 +9,15 @@ const model = genAI.getGenerativeModel({
   generationConfig: { responseMimeType: "application/json" },
 });
 
+const empty = { national: [], prefecture: [], city: [], chamber: [], other: [] };
+
 export async function POST(req: Request) {
   const company: Company = await req.json();
   const supabase = createServerSupabaseClient();
   const today = new Date().toISOString().split("T")[0];
 
   try {
-    // ── Step 1: 地域だけで絞る（業種フィルターなし）──
-    // layer/prefecture/city カラムでフィルタ
+    // ── Step 1: 地域で絞る ──
     const orConditions = [
       "layer.eq.national",
       "layer.eq.chamber",
@@ -29,10 +30,9 @@ export async function POST(req: Request) {
       orConditions.push(`city.eq.${company.city}`);
     }
 
-    console.log("[matching] orConditions:", orConditions.join(","));
-    console.log("[matching] today:", today);
+    console.log("[matching] query:", orConditions.join(","), "today:", today);
 
-    const { data: candidates, error } = await supabase
+    let { data: candidates, error } = await supabase
       .from("subsidies")
       .select("*")
       .eq("is_active", true)
@@ -40,20 +40,57 @@ export async function POST(req: Request) {
       .or(orConditions.join(","))
       .limit(80);
 
-    console.log("[matching] candidates count:", candidates?.length ?? 0, "error:", error?.message ?? "none");
+    console.log("[matching] Step1 result:", candidates?.length ?? 0, "err:", error?.message ?? "none");
 
-    if (error || !candidates || candidates.length === 0) {
-      // フォールバック: フィルターなしで全件取得してみる
-      const { data: allSubs, error: allErr } = await supabase
+    // フォールバック1: 地域フィルターを外す
+    if (error || !candidates?.length) {
+      console.log("[matching] fallback1: removing geo filter...");
+      const fb1 = await supabase
         .from("subsidies")
-        .select("id, name, layer, prefecture, city, is_active, deadline_date")
-        .limit(5);
-      console.log("[matching] fallback sample:", JSON.stringify(allSubs), "error:", allErr?.message ?? "none");
-
-      return NextResponse.json({
-        national: [], prefecture: [], city: [], chamber: [], other: [],
-      });
+        .select("*")
+        .eq("is_active", true)
+        .gte("deadline_date", today)
+        .limit(80);
+      console.log("[matching] fallback1:", fb1.data?.length ?? 0, "err:", fb1.error?.message ?? "none");
+      if (fb1.data?.length) {
+        candidates = fb1.data;
+        error = null;
+      }
     }
+
+    // フォールバック2: deadline_dateフィルターも外す
+    if (error || !candidates?.length) {
+      console.log("[matching] fallback2: removing deadline filter...");
+      const fb2 = await supabase
+        .from("subsidies")
+        .select("*")
+        .eq("is_active", true)
+        .limit(80);
+      console.log("[matching] fallback2:", fb2.data?.length ?? 0, "err:", fb2.error?.message ?? "none");
+      if (fb2.data?.length) {
+        candidates = fb2.data;
+        error = null;
+      }
+    }
+
+    // フォールバック3: フィルターなし（DBにデータがあるか確認）
+    if (error || !candidates?.length) {
+      console.log("[matching] fallback3: no filters at all...");
+      const fb3 = await supabase
+        .from("subsidies")
+        .select("*")
+        .limit(80);
+      console.log("[matching] fallback3:", fb3.data?.length ?? 0, "err:", fb3.error?.message ?? "none");
+      if (fb3.data?.length) {
+        candidates = fb3.data;
+        error = null;
+      } else {
+        console.error("[matching] DB is empty or inaccessible");
+        return NextResponse.json(empty);
+      }
+    }
+
+    console.log("[matching] proceeding with", candidates.length, "candidates");
 
     // ── Step 2: Geminiに全判断を任せる ──
     const prompt = `あなたは補助金申請の専門家です。
@@ -119,19 +156,22 @@ ${JSON.stringify(candidates.map(s => ({
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-    console.log("[matching] Gemini raw length:", text.length);
+    console.log("[matching] Gemini response length:", text.length);
     const ranked: any[] = JSON.parse(text);
-    console.log("[matching] ranked count:", ranked.length, "layers:", ranked.map(r => r.layer));
+    console.log("[matching] ranked count:", ranked.length, "layers:", Array.from(new Set(ranked.map(r => r.layer))));
 
     // ── Step 3: GeminiのスコアをDBデータとマージして返す ──
     const mergeLayer = (layer: string) => {
-      return ranked
+      const layerResults = ranked
         .filter(r => r.layer === layer)
         .sort((a, b) => b.score - a.score)
         .slice(0, 4)
         .map(r => {
-          const db = candidates.find(c => c.id === r.id);
-          if (!db) return null;
+          const db = candidates!.find(c => c.id === r.id);
+          if (!db) {
+            console.log("[matching] merge miss: Gemini returned id", r.id, "not found in candidates");
+            return null;
+          }
           return {
             id: db.id,
             name: db.name,
@@ -160,21 +200,25 @@ ${JSON.stringify(candidates.map(s => ({
           } as Subsidy;
         })
         .filter(Boolean) as Subsidy[];
+      console.log("[matching] mergeLayer", layer, "→", layerResults.length, "items");
+      return layerResults;
     };
 
-    return NextResponse.json({
+    const response = {
       national:   mergeLayer("national"),
       prefecture: mergeLayer("prefecture"),
       city:       mergeLayer("city"),
       chamber:    mergeLayer("chamber"),
       other:      mergeLayer("other"),
-    });
+    };
+
+    const total = Object.values(response).reduce((sum, arr) => sum + arr.length, 0);
+    console.log("[matching] DONE — total results:", total);
+
+    return NextResponse.json(response);
 
   } catch (e: any) {
     console.error("[matching] CATCH error:", e?.message || e);
-    return NextResponse.json(
-      { national: [], prefecture: [], city: [], chamber: [], other: [] },
-      { status: 500 }
-    );
+    return NextResponse.json(empty, { status: 500 });
   }
 }
