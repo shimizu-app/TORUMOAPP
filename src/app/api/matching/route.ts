@@ -17,13 +17,20 @@ export async function POST(req: Request) {
   try {
     // ── Step 1: 地域だけで絞る（業種フィルターなし）──
     // layer/prefecture/city カラムでフィルタ
-    const orConditions = ["layer.eq.national"];
+    const orConditions = [
+      "layer.eq.national",
+      "layer.eq.chamber",
+      "layer.eq.other",
+    ];
     if (company.prefecture) {
       orConditions.push(`prefecture.eq.${company.prefecture}`);
     }
     if (company.city) {
       orConditions.push(`city.eq.${company.city}`);
     }
+
+    console.log("[matching] orConditions:", orConditions.join(","));
+    console.log("[matching] today:", today);
 
     const { data: candidates, error } = await supabase
       .from("subsidies")
@@ -33,8 +40,16 @@ export async function POST(req: Request) {
       .or(orConditions.join(","))
       .limit(80);
 
+    console.log("[matching] candidates count:", candidates?.length ?? 0, "error:", error?.message ?? "none");
+
     if (error || !candidates || candidates.length === 0) {
-      console.error("Supabase fetch error:", error);
+      // フォールバック: フィルターなしで全件取得してみる
+      const { data: allSubs, error: allErr } = await supabase
+        .from("subsidies")
+        .select("id, name, layer, prefecture, city, is_active, deadline_date")
+        .limit(5);
+      console.log("[matching] fallback sample:", JSON.stringify(allSubs), "error:", allErr?.message ?? "none");
+
       return NextResponse.json({
         national: [], prefecture: [], city: [], chamber: [], other: [],
       });
@@ -104,7 +119,9 @@ ${JSON.stringify(candidates.map(s => ({
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
+    console.log("[matching] Gemini raw length:", text.length);
     const ranked: any[] = JSON.parse(text);
+    console.log("[matching] ranked count:", ranked.length, "layers:", ranked.map(r => r.layer));
 
     // ── Step 3: GeminiのスコアをDBデータとマージして返す ──
     const mergeLayer = (layer: string) => {
@@ -153,8 +170,8 @@ ${JSON.stringify(candidates.map(s => ({
       other:      mergeLayer("other"),
     });
 
-  } catch (e) {
-    console.error("Matching error:", e);
+  } catch (e: any) {
+    console.error("[matching] CATCH error:", e?.message || e);
     return NextResponse.json(
       { national: [], prefecture: [], city: [], chamber: [], other: [] },
       { status: 500 }
