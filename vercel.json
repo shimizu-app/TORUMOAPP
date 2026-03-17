@@ -4,5 +4,10 @@
       "path": "/api/batch/sync-subsidies",
       "schedule": "0 17 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/batch/sync-subsidies/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }
