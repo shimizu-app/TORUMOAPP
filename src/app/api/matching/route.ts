@@ -16,12 +16,13 @@ export async function POST(req: Request) {
 
   try {
     // ── Step 1: 地域だけで絞る（業種フィルターなし）──
-    const orConditions = ["target_area.ilike.%全国%"];
+    // layer/prefecture/city カラムでフィルタ
+    const orConditions = ["layer.eq.national"];
     if (company.prefecture) {
-      orConditions.push(`target_area.ilike.%${company.prefecture}%`);
+      orConditions.push(`prefecture.eq.${company.prefecture}`);
     }
     if (company.city) {
-      orConditions.push(`target_area.ilike.%${company.city}%`);
+      orConditions.push(`city.eq.${company.city}`);
     }
 
     const { data: candidates, error } = await supabase
@@ -68,7 +69,8 @@ ${JSON.stringify(candidates.map(s => ({
   name: s.name,
   org: s.org,
   layer: s.layer,
-  target_area: s.target_area,
+  prefecture: s.prefecture,
+  city: s.city,
   max_amount: s.max_amount,
   rate: s.rate,
   deadline: s.deadline_date,
@@ -137,7 +139,7 @@ ${JSON.stringify(candidates.map(s => ({
             url: db.url || "",
             prefecture: db.prefecture,
             city: db.city,
-            target_area: db.target_area,
+            target_area: db.prefecture ? `${db.prefecture}${db.city || ""}` : "全国",
           } as Subsidy;
         })
         .filter(Boolean) as Subsidy[];
