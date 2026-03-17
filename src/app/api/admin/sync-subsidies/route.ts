@@ -176,6 +176,14 @@ function classifyLayer(s: any, sourcePref?: string, sourceCity?: string): {
     if (isCityLevel) {
       return { layer: "city", prefecture: sourcePref, city: prefRemoved.split(/[\/、,]/)[0].trim() || null };
     }
+    // タイトルや組織名から市区町村を抽出
+    const title = s.title || "";
+    const org = s.government_agencies || "";
+    const text = title + " " + org;
+    const cityMatch = text.match(/【?([^\s【】]+?[市区町村])】?/);
+    if (cityMatch) {
+      return { layer: "city", prefecture: sourcePref, city: cityMatch[1] };
+    }
     return { layer: "prefecture", prefecture: sourcePref, city: null };
   }
 
