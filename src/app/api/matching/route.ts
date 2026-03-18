@@ -94,16 +94,14 @@ export async function POST(req: Request) {
 
     // ── Step 2: Geminiに全判断を任せる ──
     const prompt = `あなたは補助金申請の専門家です。
-以下の企業情報と補助金候補リストをもとに、
+以下の企業情報と補助金候補をもとに、
 この企業が申請できる補助金を選んでJSON配列で返してください。
 
 【重要なルール】
 - 業種が直接合わなくても「名目次第でいける」場合は積極的に含める
-  例: 飲食業でも「デジタル注文システム導入」名目でIT導入補助金に申請できる
-  例: 飲食業でも「厨房設備の省エネ化」名目で省エネ補助金に申請できる
 - 「絶対に無関係」なもの（農業専用なのにIT企業など）だけ除外
-- それ以外は広めに出して採択可能性で判断する
-- 各レイヤー（national/prefecture/city/chamber/other）から最大4件ずつ選ぶ
+- それ以外は広めに出して採択可能性（score）で判断する
+- 各レイヤーから最大4件ずつ選ぶ
 
 【企業情報】
 業種: ${company.industry}（${company.industryDetail || ""}）
@@ -121,8 +119,7 @@ ${JSON.stringify(candidates.map(s => ({
   name: s.name,
   org: s.org,
   layer: s.layer,
-  prefecture: s.prefecture,
-  city: s.city,
+  target_area: s.target_area,
   max_amount: s.max_amount,
   rate: s.rate,
   deadline: s.deadline_date,
@@ -132,24 +129,70 @@ ${JSON.stringify(candidates.map(s => ({
 })))}
 
 【返すJSONの形式】
-以下のキーを持つオブジェクトの配列を返してください:
 [
   {
-    "id": "補助金のid（候補リストのidをそのまま）",
+    "id": "補助金のid",
     "layer": "national/prefecture/city/chamber/other",
     "score": 採択見込み（50〜95の数値）,
     "status": "高/中/低",
-    "strategy": "この企業がこの補助金を取るための戦略（1〜2文）",
-    "reason": "なぜこの企業に合うか・どんな名目で申請できるか（1文）",
+
+    "policyBackground": "この補助金が存在する政策的背景・行政の意図（2〜3文）",
+
+    "strategy": "政策背景を踏まえて、この企業がこの補助金を取るための戦略（2〜3文）",
+
     "nameIdeas": [
-      {"label": "攻め", "text": "高い補助額を狙える申請名目"},
-      {"label": "標準", "text": "採択率が高い王道の申請名目"},
-      {"label": "確実", "text": "要件を確実に満たせる保守的な申請名目"}
+      {
+        "label": "攻め",
+        "text": "高い補助額を狙える申請名目",
+        "detail": "この名目で申請する場合の具体的なポイント・どんな内容を書くべきか・使えるツールや手法の例（3〜4文）"
+      },
+      {
+        "label": "標準",
+        "text": "採択率が高い王道の申請名目",
+        "detail": "この名目で申請する場合の具体的なポイント・採択実績が多い理由・審査員に刺さる書き方（3〜4文）"
+      },
+      {
+        "label": "確実",
+        "text": "要件を確実に満たせる保守的な申請名目",
+        "detail": "この名目で申請する場合の最低限満たすべき要件・リスクが低い理由・注意点（3〜4文）"
+      }
     ],
+
+    "reviewPoints": [
+      {
+        "num": "01",
+        "label": "審査項目名",
+        "desc": "この補助金でこの項目が重視される理由・何をどう書けばいいか・数字の整合性で必要なもの（2〜3文）",
+        "weight": "高/中"
+      }
+      // 4〜5件
+    ],
+
+    "rejectionReasons": [
+      {
+        "reason": "よくある不採択理由（具体的に）",
+        "detail": "なぜ落ちるか・どう書けば回避できるか・特にこの業種で注意すべき点"
+      }
+      // 4〜5件
+    ],
+
+    "adoptionPatterns": [
+      {
+        "tag": "パターン名（例: DX×製造）",
+        "example": "匿名の採択事例（業種・規模・課題・何をどう申請したか・審査員に刺さったポイント）",
+        "applicability": "この企業がこのパターンを使えるかどうかの評価"
+      }
+      // 2〜3件
+    ],
+
+    "hiddenPoints": [
+      "公式には書いていないが採択率に影響するポイント（認知度の高いツール・事前相談先・審査員の心証など）"
+      // 2〜3件
+    ],
+
     "sections": [
-      {"id": "s1", "label": "審査項目名", "sub": "何を書くか"},
-      {"id": "s2", "label": "審査項目名", "sub": "何を書くか"},
-      {"id": "s3", "label": "審査項目名", "sub": "何を書くか"}
+      {"id": "s1", "label": "審査項目名", "sub": "何を書くか"}
+      // 3〜5件
     ]
   }
 ]`;
@@ -211,6 +254,11 @@ ${JSON.stringify(candidates.map(s => ({
             strategy: r.strategy || "",
             reason: r.reason || "",
             nameIdeas: r.nameIdeas || [],
+            policyBackground: r.policyBackground || "",
+            reviewPoints: r.reviewPoints || [],
+            rejectionReasons: r.rejectionReasons || [],
+            adoptionPatterns: r.adoptionPatterns || [],
+            hiddenPoints: r.hiddenPoints || [],
             sections: r.sections || [],
             tags: db.tags || [],
             eligible: db.eligible || "",
