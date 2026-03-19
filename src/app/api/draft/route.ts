@@ -3,21 +3,31 @@ import { callAI } from "@/lib/anthropic";
 
 export async function POST(req: Request) {
   try {
-    const { subsidyName, sectionLabel, sectionId, nameIdea, company, length, wizardAnswer } =
+    const { subsidyName, sectionLabel, sectionId, sectionSub, nameIdea, company, length, wizardAnswer, policyBackground } =
       await req.json();
 
     const len =
       length === "簡潔" ? "200字程度" : length === "標準" ? "400字程度" : "700字程度";
 
-    const cfInfo = company.cashflow
-      ? `\nキャッシュフロー:${company.cashflow}\n借入状況:${company.borrowing || "不明"}`
-      : "";
-    const wizInfo = wizardAnswer ? `\n担当者の補足情報:${wizardAnswer}` : "";
+    const systemPrompt = `あなたは補助金申請書の専門家です。
+「${sectionLabel}」を${len}で書いてください。
+政策背景: ${policyBackground || ""}
+申請名目: ${nameIdea}
 
-    const text = await callAI(
-      `あなたは補助金申請書の専門家です。「${sectionLabel}」を${len}で書いてください。具体的な数字・事例を入れ採択されやすい文章にしてください。${sectionId === "finance" ? "特にキャッシュフローと資金調達計画を具体的に記載してください。" : ""}`,
-      `補助金:${subsidyName}\n申請名目:${nameIdea}\n企業情報:${JSON.stringify(company, null, 2)}${cfInfo}${wizInfo}\n\n「${sectionLabel}」を${len}で作成してください。`
-    );
+以下のルールを守ること:
+・具体的な数字・固有名詞を必ず入れる
+・「革新性」「実現可能性」を意識した表現にする
+・申請者の補足情報がある場合は最優先で反映する
+・採択されやすい説得力のある文章にする
+${sectionId === "finance" ? "・特にキャッシュフローと投資回収期間を具体的に記載すること" : ""}`;
+
+    const userPrompt = `補助金: ${subsidyName}
+企業情報: ${JSON.stringify(company, null, 2)}
+${wizardAnswer ? `\n【申請者からの補足情報（最優先で反映すること）】\n${wizardAnswer}` : ""}
+
+「${sectionLabel}」（${sectionSub || ""}）を${len}で作成してください。`;
+
+    const text = await callAI(systemPrompt, userPrompt);
 
     return NextResponse.json({ text });
   } catch (e) {
