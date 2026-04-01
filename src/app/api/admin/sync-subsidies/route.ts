@@ -13,7 +13,6 @@ const PREFECTURES = [
   "熊本県","大分県","宮崎県","鹿児島県","沖縄県",
 ];
 
-// 主要市（県との対応付き）
 const MAJOR_CITIES: { city: string; pref: string }[] = [
   { city: "札幌市", pref: "北海道" },
   { city: "仙台市", pref: "宮城県" },
@@ -164,14 +163,11 @@ function classifyLayer(s: any, sourcePref?: string, sourceCity?: string): {
 } {
   const targetArea = s.target_area_search || "";
 
-  // 市区町村キーワードで取得した場合
   if (sourceCity && sourcePref) {
     return { layer: "city", prefecture: sourcePref, city: sourceCity };
   }
 
-  // 都道府県キーワードで取得した場合
   if (sourcePref) {
-    // target_areaに市区町村が含まれていればcity
     const prefRemoved = targetArea.replace(sourcePref, "").trim();
     const isCityLevel = prefRemoved.length > 0 && (
       prefRemoved.includes("市") || prefRemoved.includes("区") ||
@@ -191,7 +187,6 @@ function classifyLayer(s: any, sourcePref?: string, sourceCity?: string): {
     return { layer: "prefecture", prefecture: sourcePref, city: null };
   }
 
-  // 全国キーワードで取得した場合: target_areaで判定
   if (!targetArea || targetArea.includes("全国") || targetArea === "") {
     return { layer: "national", prefecture: null, city: null };
   }
@@ -260,25 +255,22 @@ async function upsertChunked(supabase: any, records: any[]) {
     const { error } = await supabase
       .from("subsidies")
       .upsert(chunk, { onConflict: "jgrants_id", ignoreDuplicates: false });
-    if (error) console.error(`Upsert error:`, error);
+    if (error) return { total, error };
     else total += chunk.length;
   }
-  return total;
+  return { total, error: null };
 }
 
-export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+// 認証不要の管理用エンドポイント（UIから実行）
+export async function GET() {
   const supabase = createAdminClient();
+  const logs: string[] = [];
   const seenIds = new Set<string>();
   let totalUpserted = 0;
 
   try {
-    // ── 1. 全国系キーワードで国の補助金を取得 ──
-    console.log("=== STEP 1: 全国系キーワード ===");
+    // ── 1. 全国系キーワード ──
+    logs.push("=== STEP 1: 全国系キーワード ===");
     const nationalKeywords = [
       "補助金", "助成金", "支援", "ものづくり", "IT導入",
       "事業再構築", "省エネ", "雇用調整", "キャリアアップ",
@@ -295,14 +287,16 @@ export async function GET(req: Request) {
           added++;
         }
       }
-      console.log(`  "${kw}": ${items.length}件取得 → ${added}件新規`);
+      logs.push(`  "${kw}": ${items.length}件取得 → ${added}件新規`);
       await new Promise(r => setTimeout(r, 300));
     }
-    console.log(`全国系合計: ${nationalRecords.length}件`);
-    totalUpserted += await upsertChunked(supabase, nationalRecords);
+    logs.push(`全国系合計: ${nationalRecords.length}件`);
+    const r1 = await upsertChunked(supabase, nationalRecords);
+    totalUpserted += r1.total;
+    if (r1.error) logs.push(`Upsert error (national): ${JSON.stringify(r1.error)}`);
 
-    // ── 2. 都道府県名キーワードで県の補助金を取得 ──
-    console.log("=== STEP 2: 都道府県キーワード ===");
+    // ── 2. 都道府県名キーワード ──
+    logs.push("\n=== STEP 2: 都道府県キーワード ===");
     const prefRecords: any[] = [];
     for (const pref of PREFECTURES) {
       const items = await fetchByKeyword(pref, 100);
@@ -314,16 +308,16 @@ export async function GET(req: Request) {
           added++;
         }
       }
-      if (items.length > 0) {
-        console.log(`  ${pref}: ${items.length}件取得 → ${added}件新規`);
-      }
+      logs.push(`  ${pref}: ${items.length}件取得 → ${added}件新規`);
       await new Promise(r => setTimeout(r, 300));
     }
-    console.log(`都道府県系合計: ${prefRecords.length}件`);
-    totalUpserted += await upsertChunked(supabase, prefRecords);
+    logs.push(`都道府県系合計: ${prefRecords.length}件`);
+    const r2 = await upsertChunked(supabase, prefRecords);
+    totalUpserted += r2.total;
+    if (r2.error) logs.push(`Upsert error (pref): ${JSON.stringify(r2.error)}`);
 
-    // ── 3. 市名キーワードで市の補助金を取得 ──
-    console.log("=== STEP 3: 市名キーワード ===");
+    // ── 3. 市名キーワード ──
+    logs.push("\n=== STEP 3: 市名キーワード ===");
     const cityRecords: any[] = [];
     for (const { city, pref } of MAJOR_CITIES) {
       const items = await fetchByKeyword(city, 50);
@@ -336,12 +330,14 @@ export async function GET(req: Request) {
         }
       }
       if (items.length > 0) {
-        console.log(`  ${city}: ${items.length}件取得 → ${added}件新規`);
+        logs.push(`  ${city}: ${items.length}件取得 → ${added}件新規`);
       }
       await new Promise(r => setTimeout(r, 300));
     }
-    console.log(`市区町村系合計: ${cityRecords.length}件`);
-    totalUpserted += await upsertChunked(supabase, cityRecords);
+    logs.push(`市区町村系合計: ${cityRecords.length}件`);
+    const r3 = await upsertChunked(supabase, cityRecords);
+    totalUpserted += r3.total;
+    if (r3.error) logs.push(`Upsert error (city): ${JSON.stringify(r3.error)}`);
 
     // ── 4. 期限切れを無効化 ──
     await supabase
@@ -361,16 +357,20 @@ export async function GET(req: Request) {
       return acc;
     }, {});
 
-    console.log(`\n=== 完了: ${totalUpserted}件 ===`);
-    console.log("DB stats:", dbStats);
+    logs.push(`\n=== 完了: ${totalUpserted}件 upserted ===`);
+    logs.push(`DB stats (active):`);
+    Object.entries(dbStats).forEach(([layer, count]) => {
+      logs.push(`  ${layer}: ${count} 件`);
+    });
 
     return NextResponse.json({
       success: true,
       upserted: totalUpserted,
-      dbStats,
+      stats: dbStats,
+      logs,
     });
   } catch (e) {
-    console.error("Batch sync error:", e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    logs.push(`ERROR: ${String(e)}`);
+    return NextResponse.json({ success: false, error: String(e), logs }, { status: 500 });
   }
 }

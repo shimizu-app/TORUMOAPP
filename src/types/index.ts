@@ -19,6 +19,25 @@ export interface Company {
 export interface NameIdea {
   label: string;
   text: string;
+  detail?: string;
+}
+
+export interface ReviewPoint {
+  num: string;
+  label: string;
+  desc: string;
+  weight: "高" | "中" | "低";
+}
+
+export interface RejectionReason {
+  reason: string;
+  detail: string;
+}
+
+export interface AdoptionPattern {
+  tag: string;
+  example: string;
+  applicability: string;
 }
 
 export interface Section {
@@ -51,9 +70,15 @@ export interface Subsidy {
   reason?: string;
   url?: string;
   form_url?: string;
+  policyBackground?: string;
+  reviewPoints?: ReviewPoint[];
+  rejectionReasons?: RejectionReason[];
+  adoptionPatterns?: AdoptionPattern[];
+  hiddenPoints?: string[];
   sections?: Section[];
   prefecture?: string;
   city?: string;
+  target_area?: string;
   is_active?: boolean;
 }
 
