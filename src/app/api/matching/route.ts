@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { Company, Subsidy } from "@/types";
+import { safeJSON } from "@/lib/anthropic";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel({
@@ -223,7 +224,11 @@ ${JSON.stringify(candidates.map(s => ({
     }
 
     console.log("[matching] Gemini response length:", text.length);
-    const ranked: any[] = JSON.parse(text);
+    const ranked: any[] = safeJSON<any[]>(text);
+    if (!ranked.length) {
+      console.error("[matching] Gemini returned unparseable or empty JSON. First 500 chars:", text.slice(0, 500));
+      return NextResponse.json(empty, { status: 502 });
+    }
     console.log("[matching] ranked count:", ranked.length, "layers:", Array.from(new Set(ranked.map(r => r.layer))));
 
     // ── Step 3: GeminiのスコアをDBデータとマージして返す ──
